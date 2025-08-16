@@ -18,10 +18,13 @@ import (
 type LogFile struct {
 	Path    string
 	Content []byte
+	lbabel  *widget.Label
 }
 
 func (lfObj *LogFile) SetPath(path string) {
 	lfObj.Path = path
+	log.Println("Log file path set to:", path)
+	lfObj.lbabel.SetText(fmt.Sprintf("Selected: %s", path))
 }
 
 func (lfObj *LogFile) SetContent(content []byte) {
@@ -39,6 +42,7 @@ func main() {
 	lf := &LogFile{
 		Path:    "",
 		Content: nil,
+		lbabel:  label,
 	}
 
 	pageBtn := clickable.NewClickable(pageBtnStack, func() {
@@ -49,26 +53,30 @@ func main() {
 			log.Println("Error:", err)
 			return
 		}
-
 		if file != "" {
-			label.SetText(fmt.Sprintf("Selected: %s", file))
 			content, err := os.ReadFile(file)
 
 			lf.SetPath(file)
-
 			lf.SetContent(content)
 
 			if err != nil {
 				log.Println("Error:", err)
+
 			}
 
 		}
 
-		fmt.Println("File selected:", lf.Path)
-		log.Println("File content:", string(lf.Content))
 	})
 
 	window.SetContent(pageBtn)
+
+	window.SetOnDropped(func(pos fyne.Position, uris []fyne.URI) {
+		if len(uris) > 0 {
+			lf.SetPath(uris[0].Path())
+		}
+	})
+
 	window.Resize(fyne.NewSize(600, 400))
 	window.ShowAndRun()
+
 }
