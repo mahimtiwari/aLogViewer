@@ -1,34 +1,59 @@
 package main
 
 import (
+	"alogviewer/screens/logviewer"
 	"alogviewer/widgets/clickable"
 	"fmt"
+	"regexp"
+	"runtime/debug"
+
 	"image/color"
 	"log"
-	"os"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 	"github.com/sqweek/dialog"
 )
 
 type LogFile struct {
-	Path    string
-	Content []byte
-	lbabel  *widget.Label
+	Path       string
+	window     fyne.Window
+	viewerBool bool
 }
 
 func (lfObj *LogFile) SetPath(path string) {
+	valid, _ := regexp.MatchString(`\.log(\.\d+)?$`, path)
+	if len(path) < 4 || !valid || lfObj.Path == path {
+		log.Println("Selected file is not a .log file or is the same as the current one")
+		return
+
+	}
+
 	lfObj.Path = path
 	log.Println("Log file path set to:", path)
-	lfObj.lbabel.SetText(fmt.Sprintf("Selected: %s", path))
+	lfObj.viewerBool = true
+	lfObj.window.SetContent(logviewer.LogViewerScreen(lfObj.Path))
+
 }
 
-func (lfObj *LogFile) SetContent(content []byte) {
-	lfObj.Content = content
+func fileAreaClicked(lf *LogFile) {
+	file, err := dialog.File().Title("Select a log file").Filter("Log files", "log", "log.*").Load()
+
+	if err != nil {
+		log.Println("Error:", err)
+		return
+	}
+
+	lf.SetPath(file)
+
+}
+
+func fileAreaHovered(mouse *desktop.MouseEvent) {
+
 }
 
 func main() {
@@ -38,40 +63,47 @@ func main() {
 	rect := canvas.NewRectangle(color.NRGBA{R: 0, G: 0, B: 0, A: 0})
 	label := widget.NewLabel("Select or Drop a log File")
 	pageBtnStack := container.NewStack(rect, container.NewCenter(label))
-
 	lf := &LogFile{
-		Path:    "",
-		Content: nil,
-		lbabel:  label,
+		Path:       "",
+		window:     window,
+		viewerBool: false,
 	}
 
-	pageBtn := clickable.NewClickable(pageBtnStack, func() {
-		fmt.Println("Button clicked")
-		file, err := dialog.File().Filter("Log files", "log").Load()
+	pageBtn := clickable.NewClickable(
+		pageBtnStack,
+		func() { fileAreaClicked(lf) },
+		fileAreaHovered)
 
-		if err != nil {
-			log.Println("Error:", err)
-			return
-		}
-		if file != "" {
-			content, err := os.ReadFile(file)
+	fileMenu := fyne.NewMenu("File",
+		fyne.NewMenuItem("Open", func() { fileAreaClicked(lf) }),
+	)
 
-			lf.SetPath(file)
-			lf.SetContent(content)
+	viewMenu := fyne.NewMenu("View",
+		fyne.NewMenuItem("Refresh", func() {
+			fmt.Println("Refresh clicked")
+		}),
+		fyne.NewMenuItem("Free Memory", func() {
+			debug.FreeOSMemory()
+		}),
+	)
 
-			if err != nil {
-				log.Println("Error:", err)
+	helpMenu := fyne.NewMenu("Help",
+		fyne.NewMenuItem("About", func() {
+			fmt.Println("About clicked")
+		}),
+	)
 
-			}
-
-		}
-
-	})
+	window.SetMainMenu(fyne.NewMainMenu(
+		fileMenu,
+		viewMenu,
+		helpMenu,
+	))
 
 	window.SetContent(pageBtn)
 
 	window.SetOnDropped(func(pos fyne.Position, uris []fyne.URI) {
-		if len(uris) > 0 {
+
+		if len(uris) > 0 && !lf.viewerBool {
 			lf.SetPath(uris[0].Path())
 		}
 	})
