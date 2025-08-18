@@ -57,8 +57,8 @@ func fileAreaHovered(mouse *desktop.MouseEvent) {
 }
 
 func main() {
-	app := app.New()
 
+	app := app.New()
 	window := app.NewWindow("aLogViewer")
 	rect := canvas.NewRectangle(color.NRGBA{R: 0, G: 0, B: 0, A: 0})
 	label := widget.NewLabel("Select or Drop a log File")

@@ -94,24 +94,52 @@ func getTopIPs(ipCount map[string]int, n int) []struct {
 }
 
 func LogViewerScreen(path string) fyne.CanvasObject {
+	// ipCount, err := parseLogFile(path)
+	// if err != nil {
+	// 	return widget.NewLabel("Error: " + err.Error())
+	// }
+	// topIPs := getTopIPs(ipCount, 10)
+
+	// fmt.Println("Top IPs:", topIPs)
+
+	// list := widget.NewList(
+	// 	func() int { return len(topIPs) },
+	// 	func() fyne.CanvasObject { return widget.NewLabel("") },
+	// 	func(i widget.ListItemID, o fyne.CanvasObject) {
+	// 		o.(*widget.Label).SetText(topIPs[i].IP + ": " + fmt.Sprintf("%d", topIPs[i].Count))
+	// 	},
+	// )
 	ipCount, err := parseLogFile(path)
+
 	if err != nil {
 		return widget.NewLabel("Error: " + err.Error())
 	}
 	topIPs := getTopIPs(ipCount, 10)
+	data := [][]string{
+		{"S.no", "IP Address", "Requests"},
+	}
+	for i, ip := range topIPs {
+		data = append(data, []string{fmt.Sprintf("%d", i+1), ip.IP, fmt.Sprintf("%d", ip.Count)})
+	}
 
-	fmt.Println("Top IPs:", topIPs)
+	table := widget.NewTable(
+		func() (int, int) {
+			return len(data), len(data[0])
+		},
 
-	list := widget.NewList(
-		func() int { return len(topIPs) },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(topIPs[i].IP + ": " + fmt.Sprintf("%d", topIPs[i].Count))
+		func() fyne.CanvasObject {
+			return widget.NewLabel("placeholder")
+		},
+		// Update cell content
+		func(id widget.TableCellID, o fyne.CanvasObject) {
+			o.(*widget.Label).SetText(data[id.Row][id.Col])
 		},
 	)
 
-	return container.NewVBox(
-		widget.NewLabel("Top 10 IPs in "+path),
-		list,
-	)
+	// Set column widths for readability
+	table.SetColumnWidth(0, 60)  // S.no
+	table.SetColumnWidth(1, 180) // IP Address
+	table.SetColumnWidth(2, 100) // Requests
+
+	return container.NewMax(table)
 }
