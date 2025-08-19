@@ -14,6 +14,7 @@ import (
 
 func parseLogFile(filename string) (map[string]int, error) {
 	file, err := os.Open(filename)
+
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +68,11 @@ func (h *minHeap) Pop() interface{} {
 	return x
 }
 
+func getTopUserAgents() {
+	// TODO: Implement user agent analysis
+	return
+}
+
 func getTopIPs(ipCount map[string]int, n int) []struct {
 	IP    string
 	Count int
@@ -93,22 +99,34 @@ func getTopIPs(ipCount map[string]int, n int) []struct {
 	return result
 }
 
+func update_data(data *[][]string, view_type string, topIPs []struct {
+	IP    string
+	Count int
+}, topUserAgents []struct {
+	Agent string
+	Count int
+}) {
+
+	switch view_type {
+
+	case "analyze":
+		*data = [][]string{
+			{"S.no", "IP Address", "Requests"},
+		}
+		for i, ip := range topIPs {
+			*data = append(*data, []string{fmt.Sprintf("%d", i+1), ip.IP, fmt.Sprintf("%d", ip.Count)})
+		}
+	case "view":
+		*data = [][]string{
+			{"S.no", "User Agent", "Requests"},
+		}
+		for i, agent := range topUserAgents {
+			*data = append(*data, []string{fmt.Sprintf("%d", i+1), agent.Agent, fmt.Sprintf("%d", agent.Count)})
+		}
+	}
+}
+
 func LogViewerScreen(path string) fyne.CanvasObject {
-	// ipCount, err := parseLogFile(path)
-	// if err != nil {
-	// 	return widget.NewLabel("Error: " + err.Error())
-	// }
-	// topIPs := getTopIPs(ipCount, 10)
-
-	// fmt.Println("Top IPs:", topIPs)
-
-	// list := widget.NewList(
-	// 	func() int { return len(topIPs) },
-	// 	func() fyne.CanvasObject { return widget.NewLabel("") },
-	// 	func(i widget.ListItemID, o fyne.CanvasObject) {
-	// 		o.(*widget.Label).SetText(topIPs[i].IP + ": " + fmt.Sprintf("%d", topIPs[i].Count))
-	// 	},
-	// )
 	ipCount, err := parseLogFile(path)
 
 	if err != nil {
@@ -122,6 +140,12 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		data = append(data, []string{fmt.Sprintf("%d", i+1), ip.IP, fmt.Sprintf("%d", ip.Count)})
 	}
 
+	var analyze_btn, view_btn *widget.Button
+	var topIP, topUserAgent *widget.Button
+	var analyze_divisions *fyne.Container
+
+	selected := "analyze"
+
 	table := widget.NewTable(
 		func() (int, int) {
 			return len(data), len(data[0])
@@ -130,7 +154,7 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		func() fyne.CanvasObject {
 			return widget.NewLabel("placeholder")
 		},
-		// Update cell content
+
 		func(id widget.TableCellID, o fyne.CanvasObject) {
 			o.(*widget.Label).SetText(data[id.Row][id.Col])
 		},
@@ -141,5 +165,62 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 	table.SetColumnWidth(1, 180) // IP Address
 	table.SetColumnWidth(2, 100) // Requests
 
-	return container.NewMax(table)
+	analyze_btn = widget.NewButton("Analyze", func() {
+		selected = "analyze"
+		analyze_btn.Importance = widget.HighImportance
+		view_btn.Importance = widget.MediumImportance
+		analyze_btn.Refresh()
+		view_btn.Refresh()
+		update_data(&data, selected, topIPs, nil)
+		fmt.Println(data)
+		table.Refresh()
+		analyze_divisions.Show()
+	})
+
+	view_btn = widget.NewButton("View", func() {
+		selected = "view"
+		view_btn.Importance = widget.HighImportance
+		analyze_btn.Importance = widget.MediumImportance
+		view_btn.Refresh()
+		analyze_btn.Refresh()
+		update_data(&data, selected, topIPs, nil)
+		fmt.Println(data)
+		table.Refresh()
+		analyze_divisions.Hide()
+	})
+
+	analyze_btn.Importance = widget.HighImportance
+	view_btn.Importance = widget.MediumImportance
+
+	topIP = widget.NewButton("Top IPs", func() {
+	})
+	topUserAgent = widget.NewButton("Top User Agents", func() {
+	})
+
+	analyze_divisions = container.NewHBox(
+		topIP,
+		topUserAgent,
+	)
+
+	topBar := container.NewHBox(
+		analyze_btn,
+		view_btn,
+	)
+
+	upperActionBar := container.NewVBox(
+		topBar,
+		analyze_divisions,
+	)
+
+	scrollTable := container.NewScroll(table)
+
+	content := container.NewBorder(
+		upperActionBar,
+		nil,         // bottom
+		nil,         //left
+		nil,         // right
+		scrollTable, //center
+	)
+
+	return content
 }
