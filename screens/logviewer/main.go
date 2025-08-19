@@ -1,6 +1,7 @@
 package logviewer
 
 import (
+	"alogviewer/widgets/clickable"
 	"bufio"
 	"container/heap"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -150,11 +152,21 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		},
 
 		func() fyne.CanvasObject {
-			return widget.NewLabel("placeholder")
+			label := widget.NewLabel("placeholder")
+			return clickable.NewClickable(
+				label,
+				func() {
+					fmt.Println("table cell clicked")
+				},
+				func(mouse *desktop.MouseEvent) {
+					//hover
+				},
+			)
 		},
-
 		func(id widget.TableCellID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(data[id.Row][id.Col])
+			clickableObj := o.(*clickable.Clickable)
+			label := clickableObj.Content.(*widget.Label)
+			label.SetText(data[id.Row][id.Col])
 		},
 	)
 
