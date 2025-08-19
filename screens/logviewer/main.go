@@ -12,29 +12,30 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func parseLogFile(filename string) (map[string]int, error) {
+func parseLogFile(filename string) (map[string]int, map[string]int, error) {
 	file, err := os.Open(filename)
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer file.Close()
 
 	ipCount := make(map[string]int)
-
+	userAgentCount := make(map[string]int)
 	scanner := bufio.NewScanner(file)
 
 	for scanner.Scan() {
-
 		line := scanner.Text()
 		parts := strings.Fields(line)
 		if len(parts) > 0 {
 			ip := parts[0]
+			userAgent := parts[len(parts)-1][1 : len(parts[len(parts)-1])-1] // Remove quotes around user agent
+			userAgentCount[userAgent]++
 			ipCount[ip]++
 		}
 	}
 
-	return ipCount, scanner.Err()
+	return ipCount, userAgentCount, scanner.Err()
 }
 
 type kv struct {
@@ -68,13 +69,8 @@ func (h *minHeap) Pop() interface{} {
 	return x
 }
 
-func getTopUserAgents() {
-	// TODO: Implement user agent analysis
-	return
-}
-
-func getTopIPs(ipCount map[string]int, n int) []struct {
-	IP    string
+func getTopH(ipCount map[string]int, n int) []struct {
+	Key   string
 	Count int
 } {
 	h := &minHeap{}
@@ -87,64 +83,66 @@ func getTopIPs(ipCount map[string]int, n int) []struct {
 		}
 	}
 	result := make([]struct {
-		IP    string
+		Key   string
 		Count int
 	}, h.Len())
 
 	for i := len(result) - 1; i >= 0; i-- {
 		itm := heap.Pop(h).(kv)
-		result[i].IP = itm.Key
+		result[i].Key = itm.Key
 		result[i].Count = itm.Value
 	}
 	return result
 }
 
 func update_data(data *[][]string, view_type string, topIPs []struct {
-	IP    string
+	Key   string
 	Count int
 }, topUserAgents []struct {
-	Agent string
+	Key   string
 	Count int
 }) {
 
 	switch view_type {
 
-	case "analyze":
+	case "ip":
 		*data = [][]string{
 			{"S.no", "IP Address", "Requests"},
 		}
 		for i, ip := range topIPs {
-			*data = append(*data, []string{fmt.Sprintf("%d", i+1), ip.IP, fmt.Sprintf("%d", ip.Count)})
+			*data = append(*data, []string{fmt.Sprintf("%d", i+1), ip.Key, fmt.Sprintf("%d", ip.Count)})
 		}
-	case "view":
+	case "user_agent":
 		*data = [][]string{
 			{"S.no", "User Agent", "Requests"},
 		}
 		for i, agent := range topUserAgents {
-			*data = append(*data, []string{fmt.Sprintf("%d", i+1), agent.Agent, fmt.Sprintf("%d", agent.Count)})
+			*data = append(*data, []string{fmt.Sprintf("%d", i+1), agent.Key, fmt.Sprintf("%d", agent.Count)})
 		}
 	}
 }
 
 func LogViewerScreen(path string) fyne.CanvasObject {
-	ipCount, err := parseLogFile(path)
+	ipCount, uaCount, err := parseLogFile(path)
 
 	if err != nil {
 		return widget.NewLabel("Error: " + err.Error())
 	}
-	topIPs := getTopIPs(ipCount, 10)
+	topIPs := getTopH(ipCount, 10)
+	topUserAgents := getTopH(uaCount, 10)
 	data := [][]string{
 		{"S.no", "IP Address", "Requests"},
 	}
 	for i, ip := range topIPs {
-		data = append(data, []string{fmt.Sprintf("%d", i+1), ip.IP, fmt.Sprintf("%d", ip.Count)})
+		data = append(data, []string{fmt.Sprintf("%d", i+1), ip.Key, fmt.Sprintf("%d", ip.Count)})
 	}
 
 	var analyze_btn, view_btn *widget.Button
-	var topIP, topUserAgent *widget.Button
+	var topIP_btn, topUserAgent_btn *widget.Button
 	var analyze_divisions *fyne.Container
 
 	selected := "analyze"
+	selected_analyze_type := "ip"
 
 	table := widget.NewTable(
 		func() (int, int) {
@@ -162,7 +160,7 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 
 	// Set column widths for readability
 	table.SetColumnWidth(0, 60)  // S.no
-	table.SetColumnWidth(1, 180) // IP Address
+	table.SetColumnWidth(1, 400) // IP Address
 	table.SetColumnWidth(2, 100) // Requests
 
 	analyze_btn = widget.NewButton("Analyze", func() {
@@ -171,9 +169,7 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		view_btn.Importance = widget.MediumImportance
 		analyze_btn.Refresh()
 		view_btn.Refresh()
-		update_data(&data, selected, topIPs, nil)
-		fmt.Println(data)
-		table.Refresh()
+		fmt.Println("++++ ", selected, " ++++")
 		analyze_divisions.Show()
 	})
 
@@ -183,23 +179,37 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		analyze_btn.Importance = widget.MediumImportance
 		view_btn.Refresh()
 		analyze_btn.Refresh()
-		update_data(&data, selected, topIPs, nil)
-		fmt.Println(data)
-		table.Refresh()
 		analyze_divisions.Hide()
 	})
 
 	analyze_btn.Importance = widget.HighImportance
 	view_btn.Importance = widget.MediumImportance
 
-	topIP = widget.NewButton("Top IPs", func() {
+	topIP_btn = widget.NewButton("Top IPs", func() {
+		selected_analyze_type = "ip"
+		update_data(&data, selected_analyze_type, topIPs, nil)
+		table.Refresh()
+		topIP_btn.Importance = widget.HighImportance
+		topUserAgent_btn.Importance = widget.MediumImportance
+		topIP_btn.Refresh()
+		topUserAgent_btn.Refresh()
 	})
-	topUserAgent = widget.NewButton("Top User Agents", func() {
+	topUserAgent_btn = widget.NewButton("Top User Agents", func() {
+		selected_analyze_type = "user_agent"
+		update_data(&data, selected_analyze_type, nil, topUserAgents)
+		table.Refresh()
+		topIP_btn.Importance = widget.MediumImportance
+		topUserAgent_btn.Importance = widget.HighImportance
+		topIP_btn.Refresh()
+		topUserAgent_btn.Refresh()
 	})
 
+	topIP_btn.Importance = widget.HighImportance
+	topUserAgent_btn.Importance = widget.MediumImportance
+
 	analyze_divisions = container.NewHBox(
-		topIP,
-		topUserAgent,
+		topIP_btn,
+		topUserAgent_btn,
 	)
 
 	topBar := container.NewHBox(
