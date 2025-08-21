@@ -109,6 +109,7 @@ func main() {
 	})
 
 	window.Resize(fyne.NewSize(600, 400))
+	window.SetFixedSize(true)
 	window.ShowAndRun()
 
 }
