@@ -3,7 +3,6 @@ package main
 import (
 	"alogviewer/screens/logviewer"
 	"alogviewer/widgets/clickable"
-	"fmt"
 	"regexp"
 	"runtime/debug"
 
@@ -25,7 +24,7 @@ type LogFile struct {
 	viewerBool bool
 }
 
-func (lfObj *LogFile) SetPath(path string) {
+func (lfObj *LogFile) SetPath(path string, ap fyne.App) {
 	valid, _ := regexp.MatchString(`\.log(\.\d+)?$`, path)
 	if len(path) < 4 || !valid || lfObj.Path == path {
 		log.Println("Selected file is not a .log file or is the same as the current one")
@@ -36,11 +35,11 @@ func (lfObj *LogFile) SetPath(path string) {
 	lfObj.Path = path
 	log.Println("Log file path set to:", path)
 	lfObj.viewerBool = true
-	lfObj.window.SetContent(logviewer.LogViewerScreen(lfObj.Path))
+	lfObj.window.SetContent(logviewer.LogViewerScreen(lfObj.Path, ap))
 
 }
 
-func fileAreaClicked(lf *LogFile) {
+func fileAreaClicked(lf *LogFile, ap fyne.App) {
 	file, err := dialog.File().Title("Select a log file").Filter("Log files", "log", "log.*").Load()
 
 	if err != nil {
@@ -48,7 +47,7 @@ func fileAreaClicked(lf *LogFile) {
 		return
 	}
 
-	lf.SetPath(file)
+	lf.SetPath(file, ap)
 
 }
 
@@ -68,35 +67,22 @@ func main() {
 		window:     window,
 		viewerBool: false,
 	}
-
 	pageBtn := clickable.NewClickable(
 		pageBtnStack,
-		func() { fileAreaClicked(lf) },
+		func() { fileAreaClicked(lf, app) },
 		fileAreaHovered)
-
 	fileMenu := fyne.NewMenu("File",
-		fyne.NewMenuItem("Open", func() { fileAreaClicked(lf) }),
+		fyne.NewMenuItem("Open", func() { fileAreaClicked(lf, app) }),
 	)
-
 	viewMenu := fyne.NewMenu("View",
-		fyne.NewMenuItem("Refresh", func() {
-			fmt.Println("Refresh clicked")
-		}),
-		fyne.NewMenuItem("Free Memory", func() {
+		fyne.NewMenuItem("Optimize", func() {
 			debug.FreeOSMemory()
-		}),
-	)
-
-	helpMenu := fyne.NewMenu("Help",
-		fyne.NewMenuItem("About", func() {
-			fmt.Println("About clicked")
 		}),
 	)
 
 	window.SetMainMenu(fyne.NewMainMenu(
 		fileMenu,
 		viewMenu,
-		helpMenu,
 	))
 
 	window.SetContent(pageBtn)
@@ -104,7 +90,7 @@ func main() {
 	window.SetOnDropped(func(pos fyne.Position, uris []fyne.URI) {
 
 		if len(uris) > 0 && !lf.viewerBool {
-			lf.SetPath(uris[0].Path())
+			lf.SetPath(uris[0].Path(), app)
 		}
 	})
 

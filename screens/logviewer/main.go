@@ -5,40 +5,105 @@ import (
 	"bufio"
 	"container/heap"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
-func parseLogFile(filename string) (map[string]int, map[string]int, error) {
-	file, err := os.Open(filename)
+// Cache structure for parsed data
+type ParsedLogData struct {
+	IPCount        map[string]int
+	UserAgentCount map[string]int
+	TotalLines     int
+	LastModified   time.Time
+	Filename       string
+}
 
+var (
+	logCache      = make(map[string]*ParsedLogData)
+	cacheMutex    sync.RWMutex
+	compiledRegex *regexp.Regexp
+)
+
+func init() {
+	// Pre-compile regex for better performance
+	compiledRegex = regexp.MustCompile(`^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) ([^"]+) (\S+)" (\d{3}) (\d+|-) "([^"]*)" "([^"]*)"$`)
+}
+
+func parseLogFile(filename string) (map[string]int, map[string]int, int, error) {
+	// Check cache first
+	cacheMutex.RLock()
+	if cached, exists := logCache[filename]; exists {
+		// Check if file was modified
+		fileInfo, err := os.Stat(filename)
+		if err == nil && !fileInfo.ModTime().After(cached.LastModified) {
+			cacheMutex.RUnlock()
+			return cached.IPCount, cached.UserAgentCount, cached.TotalLines, nil
+		}
+	}
+	cacheMutex.RUnlock()
+
+	file, err := os.Open(filename)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	defer file.Close()
 
-	ipCount := make(map[string]int)
-	userAgentCount := make(map[string]int)
+	fileInfo, _ := file.Stat()
+
+	ipCount := make(map[string]int, 1000)       // Pre-allocate with estimated capacity
+	userAgentCount := make(map[string]int, 500) // Pre-allocate with estimated capacity
+
 	scanner := bufio.NewScanner(file)
+	// Use larger buffer for better performance with large log files
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	lineCount := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) > 0 {
-			ip := parts[0]
-			userAgent := parts[len(parts)-1][1 : len(parts[len(parts)-1])-1] // Remove quotes around user agent
-			userAgentCount[userAgent]++
-			ipCount[ip]++
+		if strings.TrimSpace(line) == "" {
+			continue // Skip empty lines
 		}
+
+		// Use faster field splitting
+		if firstSpace := strings.IndexByte(line, ' '); firstSpace > 0 {
+			ip := line[:firstSpace]
+			ipCount[ip]++
+
+			// Extract user agent more efficiently
+			if lastQuote := strings.LastIndexByte(line, '"'); lastQuote > 0 {
+				if secondLastQuote := strings.LastIndexByte(line[:lastQuote], '"'); secondLastQuote >= 0 {
+					userAgent := line[secondLastQuote+1 : lastQuote]
+					userAgentCount[userAgent]++
+				}
+			}
+		}
+		lineCount++
 	}
 
-	return ipCount, userAgentCount, scanner.Err()
+	// Cache the results
+	cached := &ParsedLogData{
+		IPCount:        ipCount,
+		UserAgentCount: userAgentCount,
+		TotalLines:     lineCount,
+		LastModified:   fileInfo.ModTime(),
+		Filename:       filename,
+	}
+
+	cacheMutex.Lock()
+	logCache[filename] = cached
+	cacheMutex.Unlock()
+
+	return ipCount, userAgentCount, lineCount, scanner.Err()
 }
 
 type kv struct {
@@ -161,7 +226,6 @@ func setLogData(data *[][]string, cp int, n int, filename string) (ip_c, time_c,
 
 	start := (cp - 1) * n
 	end := start + n
-	fmt.Println("Reached log entry:", start, end)
 
 	i := 1
 
@@ -199,9 +263,23 @@ func setLogData(data *[][]string, cp int, n int, filename string) (ip_c, time_c,
 
 }
 
-func LogViewerScreen(path string) fyne.CanvasObject {
-	ipCount, uaCount, err := parseLogFile(path)
+func copytxt(data [][]string, row, col int) string {
 
+	if row < 0 || row >= len(data) || col < 0 || col >= len(data[row]) {
+		return ""
+	}
+
+	if col == 0 {
+		return strings.Join(data[row], " ")
+	}
+
+	return data[row][col]
+}
+
+func LogViewerScreen(path string, app fyne.App) fyne.CanvasObject {
+	ipCount, uaCount, total_req, err := parseLogFile(path)
+	cPage := 1
+	perPage := 10
 	if err != nil {
 		return widget.NewLabel("Error: " + err.Error())
 	}
@@ -217,7 +295,8 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 	var analyze_btn, view_btn *widget.Button
 	var topIP_btn, topUserAgent_btn *widget.Button
 	var analyze_divisions *fyne.Container
-
+	var n_btn, b_btn *widget.Button
+	var pagination_buttons *fyne.Container
 	selected := "analyze"
 	selected_analyze_type := "ip"
 
@@ -237,9 +316,10 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 			label.SetText(data[id.Row][id.Col])
 
 			clickableObj.OnClick = func() {
-				fmt.Printf("Clicked cell (%d, %d)\n", id.Row, id.Col)
+				if id.Row != 0 {
+					app.Clipboard().SetContent(copytxt(data, id.Row, id.Col))
+				}
 			}
-
 		},
 	)
 
@@ -256,15 +336,13 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		table.Refresh()
 		analyze_btn.Refresh()
 		view_btn.Refresh()
-		fmt.Println("++++ ", selected, " ++++")
 		analyze_divisions.Show()
+		pagination_buttons.Hide()
 		debug.FreeOSMemory()
 	})
 
-	view_btn = widget.NewButton("View", func() {
-		selected = "view"
-		ip_c, time_c, url_c, status_c, userAgent_c := setLogData(&data, 1, 10, path)
-		fmt.Println(ip_c, time_c, url_c, status_c, userAgent_c)
+	updateTable := func() {
+		ip_c, time_c, url_c, _, userAgent_c := setLogData(&data, cPage, perPage, path)
 		nScaleFactor := float32(8.0)
 		table.SetColumnWidth(0, 40)                                // Sno
 		table.SetColumnWidth(1, float32(ip_c)*nScaleFactor)        // ip
@@ -280,7 +358,20 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		view_btn.Refresh()
 		analyze_btn.Refresh()
 		analyze_divisions.Hide()
+		b_btn.SetText(fmt.Sprintf("< %d", cPage-1))
+		n_btn.SetText(fmt.Sprintf("%d >", cPage+1))
+		if cPage == 1 {
+			b_btn.Hide()
+		} else {
+			b_btn.Show()
+		}
 		debug.FreeOSMemory()
+	}
+
+	view_btn = widget.NewButton("View", func() {
+		selected = "view"
+		updateTable()
+		pagination_buttons.Show()
 	})
 
 	analyze_btn.Importance = widget.HighImportance
@@ -314,6 +405,26 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 	topIP_btn.Importance = widget.HighImportance
 	topUserAgent_btn.Importance = widget.MediumImportance
 
+	n_btn = widget.NewButton("2 >", func() {
+
+		if selected == "view" && cPage+1 <= int(math.Ceil(float64(total_req)/float64(perPage))) {
+			cPage++
+			updateTable()
+			debug.FreeOSMemory()
+		}
+
+	})
+
+	b_btn = widget.NewButton("< 1", func() {
+		if cPage <= 1 {
+			cPage = 1
+		} else {
+			cPage--
+			updateTable()
+			debug.FreeOSMemory()
+		}
+	})
+
 	analyze_divisions = container.NewHBox(
 		topIP_btn,
 		topUserAgent_btn,
@@ -328,15 +439,23 @@ func LogViewerScreen(path string) fyne.CanvasObject {
 		topBar,
 		analyze_divisions,
 	)
+	pagination_buttons = container.NewBorder(
+		nil,
+		nil,
+		b_btn,
+		n_btn,
+		nil,
+	)
+	pagination_buttons.Hide()
 
 	scrollTable := container.NewScroll(table)
 
 	content := container.NewBorder(
 		upperActionBar,
-		nil,         // bottom
-		nil,         //left
-		nil,         // right
-		scrollTable, //center
+		pagination_buttons, // bottom
+		nil,                //left
+		nil,                // right
+		scrollTable,        //center
 	)
 
 	return content
