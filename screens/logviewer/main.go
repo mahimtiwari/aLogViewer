@@ -10,100 +10,37 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
-	"sync"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
-// Cache structure for parsed data
-type ParsedLogData struct {
-	IPCount        map[string]int
-	UserAgentCount map[string]int
-	TotalLines     int
-	LastModified   time.Time
-	Filename       string
-}
-
-var (
-	logCache      = make(map[string]*ParsedLogData)
-	cacheMutex    sync.RWMutex
-	compiledRegex *regexp.Regexp
-)
-
-func init() {
-	// Pre-compile regex for better performance
-	compiledRegex = regexp.MustCompile(`^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) ([^"]+) (\S+)" (\d{3}) (\d+|-) "([^"]*)" "([^"]*)"$`)
-}
-
 func parseLogFile(filename string) (map[string]int, map[string]int, int, error) {
-	// Check cache first
-	cacheMutex.RLock()
-	if cached, exists := logCache[filename]; exists {
-		// Check if file was modified
-		fileInfo, err := os.Stat(filename)
-		if err == nil && !fileInfo.ModTime().After(cached.LastModified) {
-			cacheMutex.RUnlock()
-			return cached.IPCount, cached.UserAgentCount, cached.TotalLines, nil
-		}
-	}
-	cacheMutex.RUnlock()
-
 	file, err := os.Open(filename)
+
 	if err != nil {
 		return nil, nil, 0, err
 	}
 	defer file.Close()
 
-	fileInfo, _ := file.Stat()
-
-	ipCount := make(map[string]int, 1000)       // Pre-allocate with estimated capacity
-	userAgentCount := make(map[string]int, 500) // Pre-allocate with estimated capacity
-
+	ipCount := make(map[string]int)
+	userAgentCount := make(map[string]int)
 	scanner := bufio.NewScanner(file)
-	// Use larger buffer for better performance with large log files
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	lineCount := 0
-
+	i := 0
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue // Skip empty lines
-		}
-
-		// Use faster field splitting
-		if firstSpace := strings.IndexByte(line, ' '); firstSpace > 0 {
-			ip := line[:firstSpace]
+		parts := strings.Fields(line)
+		if len(parts) > 0 {
+			ip := parts[0]
+			userAgent := parts[len(parts)-1][1 : len(parts[len(parts)-1])-1] // Remove quotes around user agent
+			userAgentCount[userAgent]++
 			ipCount[ip]++
-
-			// Extract user agent more efficiently
-			if lastQuote := strings.LastIndexByte(line, '"'); lastQuote > 0 {
-				if secondLastQuote := strings.LastIndexByte(line[:lastQuote], '"'); secondLastQuote >= 0 {
-					userAgent := line[secondLastQuote+1 : lastQuote]
-					userAgentCount[userAgent]++
-				}
-			}
 		}
-		lineCount++
+		i++
 	}
 
-	// Cache the results
-	cached := &ParsedLogData{
-		IPCount:        ipCount,
-		UserAgentCount: userAgentCount,
-		TotalLines:     lineCount,
-		LastModified:   fileInfo.ModTime(),
-		Filename:       filename,
-	}
-
-	cacheMutex.Lock()
-	logCache[filename] = cached
-	cacheMutex.Unlock()
-
-	return ipCount, userAgentCount, lineCount, scanner.Err()
+	return ipCount, userAgentCount, i, scanner.Err()
 }
 
 type kv struct {
